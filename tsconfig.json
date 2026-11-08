@@ -13,9 +13,9 @@
     "module": "ES2020",
     "moduleResolution": "node",
     "pretty": true,
-    "target": "ES2020",
+    "target": "ES2022",
     "outDir": "lib",
-    "lib": ["dom", "es2015"],
+    "lib": ["dom", "es2023"],
     "esModuleInterop": true,
     "allowJs": true
   },
@@ -23,6 +23,6 @@
     "indentSize": 2,
     "tabSize": 2
   },
-  "include": ["src/**/*.mts", "src/types/*.d.ts"],
-  "exclude": ["node_modules", "lib"]
+  "include": ["src/**/*.mts", "src/**/*.ts"],
+  "exclude": ["node_modules", "lib", "src/__tests__"]
 }

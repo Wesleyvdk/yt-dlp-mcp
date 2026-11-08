@@ -1,5 +1,5 @@
 import type { Config } from "../config.js";
-import { getCookieArgs } from "../config.js";
+import { getYtdlpArgs } from "../config.js";
 import { _spawnPromise, validateUrl } from "./utils.js";
 import {
   buildCommentExtractorArgs,
@@ -65,15 +65,15 @@ export async function getVideoComments(
   });
 
   const args = [
+    "--no-playlist",
     "--dump-json",
     "--no-warnings",
-    "--no-check-certificate",
     "--write-comments",
     "--extractor-args",
     buildCommentExtractorArgs(requestOptions),
     "--skip-download",
-    ...(config ? getCookieArgs(config) : []),
-    url,
+    ...(config ? getYtdlpArgs(config) : []),
+    "--", url,
   ];
 
   try {
@@ -112,15 +112,15 @@ export async function getVideoCommentsSummary(
   });
 
   const args = [
+    "--no-playlist",
     "--dump-json",
     "--no-warnings",
-    "--no-check-certificate",
     "--write-comments",
     "--extractor-args",
     buildCommentExtractorArgs(requestOptions),
     "--skip-download",
-    ...(config ? getCookieArgs(config) : []),
-    url,
+    ...(config ? getYtdlpArgs(config) : []),
+    "--", url,
   ];
 
   try {

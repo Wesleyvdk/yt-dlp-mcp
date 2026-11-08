@@ -1,623 +1,158 @@
-# 🎬 yt-dlp-mcp
+# yt-dlp MCP: video context for agents
 
-<div align="center">
+Download videos, inspect timestamped frames, read captions or local speech transcripts, and work through creator profiles from an MCP-compatible agent.
 
-**A powerful MCP server that brings video platform capabilities to your AI agents**
+Maintained fork of [kevinwatt/yt-dlp-mcp](https://github.com/kevinwatt/yt-dlp-mcp). MIT licensed; original attribution is retained in LICENSE and package.json.
 
-[![npm version](https://img.shields.io/npm/v/@kevinwatt/yt-dlp-mcp.svg)](https://www.npmjs.com/package/@kevinwatt/yt-dlp-mcp)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Node.js Version](https://img.shields.io/badge/node-%3E%3D18-brightgreen)](https://nodejs.org/)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.6-blue)](https://www.typescriptlang.org/)
+## Install from this repository
 
-Integrate yt-dlp with Claude, Dive, and other MCP-compatible AI systems. Download videos, extract metadata, get transcripts, and more — all through natural language.
+Requirements:
 
-[Features](#-features) • [Installation](#-installation) • [Tools](#-available-tools) • [Usage](#-usage-examples) • [Documentation](#-documentation)
+- Node.js 22.12 or newer.
+- A recent `yt-dlp` on PATH.
+- `ffmpeg` and `ffprobe` for merging, clipping, audio extraction and video frames.
+- This server enables its Node executable for YouTube's JavaScript challenges. Deno is another supported option.
+- Optional: the local `whisper` CLI for videos without usable captions.
 
-</div>
+On Windows, the system programs can be installed with:
 
----
+```powershell
+winget install yt-dlp.yt-dlp
+winget install Gyan.FFmpeg
+winget install DenoLand.Deno
+```
 
-## ✨ Features
+Then clone and build:
 
-<table>
-<tr>
-<td width="50%">
+```sh
+git clone https://github.com/Wesleyvdk/yt-dlp-mcp.git
+cd yt-dlp-mcp
+npm ci
+npm run build
+```
 
-### 🔍 **Search & Discovery**
-- Search YouTube with pagination
-- JSON or Markdown output formats
-- Filter by relevance and quality
+The fork's package name is `@wesleyvdk/yt-dlp-mcp`. These instructions run your checkout; they do not assume that the package has been published to npm.
 
-### 📊 **Metadata Extraction**
-- Comprehensive video information
-- Channel details and statistics
-- Upload dates, tags, categories
-- No content download required
+## Connect an agent
 
-### 📝 **Transcript & Subtitles**
-- Download subtitles in VTT format
-- Generate clean text transcripts
-- Multi-language support
-- Auto-generated captions
-
-</td>
-<td width="50%">
-
-### 🎥 **Video Downloads**
-- Resolution control (480p-1080p)
-- Video trimming support
-- Platform-agnostic (YouTube, Facebook, etc.)
-- Saved to Downloads folder
-
-### 🎵 **Audio Extraction**
-- Best quality audio (M4A/MP3)
-- Direct audio-only downloads
-- Perfect for podcasts & music
-
-### 🛡️ **Privacy & Safety**
-- No tracking or analytics
-- Direct downloads via yt-dlp
-- Zod schema validation
-- Character limits for LLM safety
-
-</td>
-</tr>
-</table>
-
----
-
-## 🚀 Installation
-
-### Prerequisites
-
-**Install yt-dlp** on your system:
-
-<table>
-<tr>
-<th>Platform</th>
-<th>Command</th>
-</tr>
-<tr>
-<td>🪟 <strong>Windows</strong></td>
-<td><code>winget install yt-dlp</code></td>
-</tr>
-<tr>
-<td>🍎 <strong>macOS</strong></td>
-<td><code>brew install yt-dlp</code></td>
-</tr>
-<tr>
-<td>🐧 <strong>Linux</strong></td>
-<td><code>pip install yt-dlp</code></td>
-</tr>
-</table>
-
-### Getting Started
-
-Add the following config to your MCP client:
+Use `node` as the MCP command and the **absolute path** to `lib/index.mjs` as its argument. For clients using `mcpServers` JSON:
 
 ```json
 {
   "mcpServers": {
     "yt-dlp": {
-      "command": "npx",
-      "args": ["-y", "@kevinwatt/yt-dlp-mcp@latest"]
-    }
-  }
-}
-```
-
-### MCP Client Configuration
-
-<details open>
-<summary><strong>Dive</strong></summary>
-
-1. Open [Dive Desktop](https://github.com/OpenAgentPlatform/Dive)
-2. Click **"+ Add MCP Server"**
-3. Paste the config provided above
-4. Click **"Save"** and you're ready!
-
-</details>
-
-<details>
-<summary><strong>Claude Code</strong></summary>
-
-Use the Claude Code CLI to add the yt-dlp MCP server ([guide](https://docs.anthropic.com/en/docs/claude-code/mcp)):
-
-```bash
-claude mcp add yt-dlp npx @kevinwatt/yt-dlp-mcp@latest
-```
-
-</details>
-
-<details>
-<summary><strong>Claude Desktop</strong></summary>
-
-Add to your `claude_desktop_config.json`:
-
-- macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
-- Windows: `%APPDATA%\Claude\claude_desktop_config.json`
-- Linux: `~/.config/Claude/claude_desktop_config.json`
-
-```json
-{
-  "mcpServers": {
-    "yt-dlp": {
-      "command": "npx",
-      "args": ["-y", "@kevinwatt/yt-dlp-mcp@latest"]
-    }
-  }
-}
-```
-
-</details>
-
-<details>
-<summary><strong>Cursor</strong></summary>
-
-Go to `Cursor Settings` -> `MCP` -> `New MCP Server`. Use the config provided above.
-
-</details>
-
-<details>
-<summary><strong>VS Code / Copilot</strong></summary>
-
-Install via the VS Code CLI:
-
-```bash
-code --add-mcp '{"name":"yt-dlp","command":"npx","args":["-y","@kevinwatt/yt-dlp-mcp@latest"]}'
-```
-
-Or follow the [MCP install guide](https://code.visualstudio.com/docs/copilot/chat/mcp-servers#_add-an-mcp-server) with the standard config from above.
-
-</details>
-
-<details>
-<summary><strong>Windsurf</strong></summary>
-
-Follow the [configure MCP guide](https://docs.windsurf.com/windsurf/cascade/mcp#mcp-config-json) using the standard config from above.
-
-</details>
-
-<details>
-<summary><strong>Cline</strong></summary>
-
-Follow [Cline MCP configuration guide](https://docs.cline.bot/mcp/configuring-mcp-servers) and use the config provided above.
-
-</details>
-
-<details>
-<summary><strong>Warp</strong></summary>
-
-Go to `Settings | AI | Manage MCP Servers` -> `+ Add` to [add an MCP Server](https://docs.warp.dev/knowledge-and-collaboration/mcp#adding-an-mcp-server). Use the config provided above.
-
-</details>
-
-<details>
-<summary><strong>JetBrains AI Assistant</strong></summary>
-
-Go to `Settings | Tools | AI Assistant | Model Context Protocol (MCP)` -> `Add`. Use the config provided above.
-
-</details>
-
-### Manual Installation
-
-```bash
-npm install -g @kevinwatt/yt-dlp-mcp
-```
-
----
-
-## 🛠️ Available Tools
-
-All tools are prefixed with `ytdlp_` to avoid naming conflicts with other MCP servers.
-
-### 🔍 Search & Discovery
-
-<table>
-<tr>
-<th width="30%">Tool</th>
-<th width="70%">Description</th>
-</tr>
-<tr>
-<td><code>ytdlp_search_videos</code></td>
-<td>
-
-Search YouTube with pagination and date filtering support
-- **Parameters**: `query`, `maxResults`, `offset`, `response_format`, `uploadDateFilter`
-- **Date Filter**: `hour`, `today`, `week`, `month`, `year` (optional)
-- **Returns**: Video list with titles, channels, durations, URLs
-- **Supports**: JSON and Markdown formats
-
-</td>
-</tr>
-</table>
-
-### 📝 Subtitles & Transcripts
-
-<table>
-<tr>
-<th width="30%">Tool</th>
-<th width="70%">Description</th>
-</tr>
-<tr>
-<td><code>ytdlp_list_subtitle_languages</code></td>
-<td>
-
-List all available subtitle languages for a video
-- **Parameters**: `url`
-- **Returns**: Available languages, formats, auto-generated status
-
-</td>
-</tr>
-<tr>
-<td><code>ytdlp_download_video_subtitles</code></td>
-<td>
-
-Download subtitles in VTT format with timestamps
-- **Parameters**: `url`, `language` (optional)
-- **Returns**: Raw VTT subtitle content
-
-</td>
-</tr>
-<tr>
-<td><code>ytdlp_download_transcript</code></td>
-<td>
-
-Generate clean plain text transcript
-- **Parameters**: `url`, `language` (optional)
-- **Returns**: Cleaned text without timestamps or formatting
-
-</td>
-</tr>
-</table>
-
-### 🎥 Video & Audio Downloads
-
-<table>
-<tr>
-<th width="30%">Tool</th>
-<th width="70%">Description</th>
-</tr>
-<tr>
-<td><code>ytdlp_download_video</code></td>
-<td>
-
-Download video to Downloads folder
-- **Parameters**: `url`, `resolution`, `startTime`, `endTime`
-- **Resolutions**: 480p, 720p, 1080p, best
-- **Supports**: Video trimming
-
-</td>
-</tr>
-<tr>
-<td><code>ytdlp_download_audio</code></td>
-<td>
-
-Extract and download audio only
-- **Parameters**: `url`
-- **Format**: Best quality M4A/MP3
-
-</td>
-</tr>
-</table>
-
-### 📊 Metadata
-
-<table>
-<tr>
-<th width="30%">Tool</th>
-<th width="70%">Description</th>
-</tr>
-<tr>
-<td><code>ytdlp_get_video_metadata</code></td>
-<td>
-
-Extract comprehensive video metadata in JSON
-- **Parameters**: `url`, `fields` (optional array)
-- **Returns**: Complete metadata or filtered fields
-- **Includes**: Views, likes, upload date, tags, formats, etc.
-
-</td>
-</tr>
-<tr>
-<td><code>ytdlp_get_video_metadata_summary</code></td>
-<td>
-
-Get human-readable metadata summary
-- **Parameters**: `url`
-- **Returns**: Formatted text with key information
-
-</td>
-</tr>
-</table>
-
-### 💬 Comments
-
-<table>
-<tr>
-<th width="30%">Tool</th>
-<th width="70%">Description</th>
-</tr>
-<tr>
-<td><code>ytdlp_get_video_comments</code></td>
-<td>
-
-Extract comments in flat JSON, threaded JSON, or AI-friendly Markdown
-- **Parameters**: `url`, `maxComments`, `sortOrder`, `view`, `responseFormat`, `maxParents`, `maxReplies`, `maxRepliesPerThread`, `maxDepth`
-- **Views**: `flat` (default) or `threaded`
-- **Formats**: `json` (default) or `markdown_tree` (`markdown_tree` requires threaded view)
-- **Returns**: Comment objects with `depth`, `reply_count`, `root_threads`, `reply_comments`, `orphan_comments`
-- **Graceful Degradation**: On platforms without parent metadata, threaded mode falls back to root-only comments
-
-</td>
-</tr>
-<tr>
-<td><code>ytdlp_get_video_comments_summary</code></td>
-<td>
-
-Get a human-readable summary of comments
-- **Parameters**: `url`, `maxComments`, `view`
-- **Views**: `flat` (linear summary) or `threaded` (grouped reply trees)
-- **Returns**: Readable comment digest with author badges, time, likes, and grouped replies
-
-</td>
-</tr>
-</table>
-
----
-
-## 💡 Usage Examples
-
-### Search Videos
-
-```
-"Search for Python programming tutorials"
-"Find the top 20 machine learning videos"
-"Search for 'react hooks tutorial' and show results 10-20"
-"Search for JavaScript courses in JSON format"
-```
-
-### Get Metadata
-
-```
-"Get metadata for https://youtube.com/watch?v=..."
-"Show me the title, channel, and view count for this video"
-"Extract just the duration and upload date"
-"Give me a quick summary of this video's info"
-```
-
-### Get Comments
-
-```
-"Get the top 20 comments for https://youtube.com/watch?v=..."
-"Get comments as threaded JSON for this video"
-"Extract comments as markdown_tree so the reply branches stay intact"
-"Get newest comments with maxDepth 1 and maxRepliesPerThread 0"
-"Summarize comments in threaded view"
-```
-
-### Download Subtitles & Transcripts
-
-```
-"List available subtitles for https://youtube.com/watch?v=..."
-"Download English subtitles from this video"
-"Get a clean transcript of this video in Spanish"
-"Download Chinese (zh-Hant) transcript"
-```
-
-### Download Content
-
-```
-"Download this video in 1080p: https://youtube.com/watch?v=..."
-"Download audio from this YouTube video"
-"Download this video from 1:30 to 2:45"
-"Save this Facebook video to my Downloads"
-```
-
----
-
-## 📖 Documentation
-
-- **[API Reference](./docs/api.md)** - Detailed tool documentation
-- **[Configuration](./docs/configuration.md)** - Environment variables and settings
-- **[Cookie Configuration](./docs/cookies.md)** - Authentication and private video access
-- **[Error Handling](./docs/error-handling.md)** - Common errors and solutions
-- **[Contributing](./docs/contributing.md)** - How to contribute
-
----
-
-## 🔧 Configuration
-
-### Environment Variables
-
-```bash
-# Downloads directory (default: ~/Downloads)
-YTDLP_DOWNLOADS_DIR=/path/to/downloads
-
-# Default resolution (default: 720p)
-YTDLP_DEFAULT_RESOLUTION=1080p
-
-# Default subtitle language (default: en)
-YTDLP_DEFAULT_SUBTITLE_LANG=en
-
-# Character limit (default: 25000)
-YTDLP_CHARACTER_LIMIT=25000
-
-# Max transcript length (default: 50000)
-YTDLP_MAX_TRANSCRIPT_LENGTH=50000
-```
-
-### Cookie Configuration
-
-To access private videos, age-restricted content, or avoid rate limits, configure cookies:
-
-> ⚠️ **Important**: Cookie authentication requires a JavaScript runtime (deno) to be installed. When using cookies, YouTube uses authenticated API endpoints that require JavaScript challenge solving. Without deno, downloads will fail with "n challenge solving failed" error.
->
-> Install deno: https://docs.deno.com/runtime/getting_started/installation/
-
-```bash
-# Extract cookies from browser (recommended)
-YTDLP_COOKIES_FROM_BROWSER=chrome
-
-# Or use a cookie file
-YTDLP_COOKIES_FILE=/path/to/cookies.txt
-```
-
-**MCP Configuration with cookies:**
-
-```json
-{
-  "mcpServers": {
-    "yt-dlp": {
-      "command": "npx",
-      "args": ["-y", "@kevinwatt/yt-dlp-mcp@latest"],
+      "command": "node",
+      "args": ["C:/path/to/yt-dlp-mcp/lib/index.mjs"],
       "env": {
-        "YTDLP_COOKIES_FROM_BROWSER": "chrome"
+        "YTDLP_DOWNLOADS_DIR": "C:/path/to/downloads",
+        "YTDLP_TIMEOUT_MS": "300000"
       }
     }
   }
 }
 ```
 
-Supported browsers: `brave`, `chrome`, `chromium`, `edge`, `firefox`, `opera`, `safari`, `vivaldi`, `whale`
+Map that command, argument and environment to your client's MCP settings. Set its tool-call timeout to at least the server timeout; profile scans and CPU transcription can take minutes. The server uses stdio. Start a fresh agent session after changing its configuration.
 
-See [Cookie Configuration Guide](./docs/cookies.md) for detailed setup instructions.
+Call `ytdlp_diagnostics` to check the local tools. A vision-capable model/client is needed to interpret the returned images. The server extracts evidence; the agent performs the visual reasoning.
 
----
+## Video inspection
 
-## 🏗️ Architecture
+Ask your agent to inspect a TikTok/YouTube URL and explain what happens. It can call:
 
-### Built With
+| Tool | Parameters | Result |
+|---|---|---|
+| `ytdlp_analyze_video` | `url`, optional `maxFrames` (1–16, default 8), `startSeconds`, `endSeconds`, `language`, `includeTranscript` | Timestamped JPEG image content, metadata, caption/Whisper segments and warnings |
+| `ytdlp_get_frame` | `url`, `timestamp` in seconds | One JPEG image at the requested moment |
+| `ytdlp_diagnostics` | None | Availability of yt-dlp, FFmpeg, ffprobe, Deno and optional Whisper |
 
-- **[yt-dlp](https://github.com/yt-dlp/yt-dlp)** - Video extraction engine
-- **[MCP SDK](https://github.com/modelcontextprotocol/typescript-sdk)** - Model Context Protocol
-- **[Zod](https://github.com/colinhacks/zod)** - TypeScript-first schema validation
-- **TypeScript** - Type safety and developer experience
+Frames are sampled uniformly within the requested range. Brief actions can fall between samples: ask for a narrower range or a specific frame. Cached media is reused for 24 hours. Defaults limit analysis to two hours and 256 MiB per video; frames fit inside 960 × 960 pixels.
 
-### Key Features
+The agent receives actual MCP image blocks, not just image file paths. Missing transcription does not discard the frames: analysis returns images with a warning.
 
-- ✅ **Type-Safe**: Full TypeScript with strict mode
-- ✅ **Validated Inputs**: Zod schemas for runtime validation
-- ✅ **Character Limits**: Automatic truncation to prevent context overflow
-- ✅ **Tool Annotations**: readOnly, destructive, idempotent hints
-- ✅ **Error Guidance**: Actionable error messages for LLMs
-- ✅ **Modular Design**: Clean separation of concerns
+For local speech recognition:
 
----
+```sh
+python -m pip install openai-whisper
+```
 
-## 📊 Response Formats
+Ensure `whisper` is on the PATH inherited by the agent, or set `YTDLP_WHISPER_BINARY` to its executable. The default is the `base` model on CPU. Whisper downloads its model weights on first use into `whisper-models` inside `YTDLP_CACHE_DIR`; an offline machine needs those weights cached first. No speech API key is used.
 
-### JSON Format
-Perfect for programmatic processing:
+## Creator profiles and between-date filters
+
+Both tools accept TikTok creator URLs, YouTube channels/videos tabs and other playlists supported by yt-dlp:
+
+- `ytdlp_list_creator_videos`: discover a bounded page without downloading media.
+- `ytdlp_download_creator_videos`: discover and download that page, returning completed paths and per-video failures.
+
+Example arguments:
+
 ```json
 {
-  "total": 50,
-  "count": 10,
-  "offset": 0,
-  "videos": [...],
-  "has_more": true,
-  "next_offset": 10
+  "url": "https://www.tiktok.com/@creator",
+  "dateFrom": "2026-10-01",
+  "dateTo": "2026-10-31",
+  "limit": 10,
+  "scanLimit": 50,
+  "offset": 0
 }
 ```
 
-### Markdown Format
-Human-readable display:
-```markdown
-Found 50 videos (showing 10):
+The download tool also accepts `resolution`: `480p`, `720p`, `1080p` or `best`.
+Resolution selection supports portrait videos by considering their width as well as landscape video height.
 
-1. **Video Title**
-   📺 Channel: Creator Name
-   ⏱️  Duration: 10:30
-   🔗 URL: https://...
+- Date boundaries are **inclusive**. Source upload dates are used; Unix timestamps are converted to UTC calendar dates.
+- `limit` counts matching videos: up to 50 for listing, 20 for downloads.
+- `scanLimit` bounds inspected source entries: default 50, maximum 200 per call.
+- `offset` is a raw source position, not a position in the filtered matches. Pass the returned `nextOffset` to continue.
+- Continue while `hasMore` is true. A page can contain no matches and still have more source entries to scan.
+- Missing dates are resolved from individual video metadata. Entries whose dates remain unknown are excluded when filtering, with warnings.
+- The server does not assume chronological ordering; pinned posts can appear first.
+- Each download failure is reported separately and completed files are preserved.
+
+TikTok profile discovery can fail even when an individual video works. Cookies, extractor updates and platform restrictions affect what yt-dlp can access. Listing is a bounded scan, not a guarantee that the entire account has been searched. Source ordering can change between requests.
+
+## Existing tools
+
+The existing tool names and inputs remain available:
+
+`ytdlp_search_videos`, `ytdlp_list_subtitle_languages`, `ytdlp_download_video_subtitles`, `ytdlp_download_transcript`, `ytdlp_download_video`, `ytdlp_download_audio`, `ytdlp_get_video_metadata`, `ytdlp_get_video_metadata_summary`, `ytdlp_get_video_comments`, `ytdlp_get_video_comments_summary`.
+
+Single-video operations disable playlist expansion. Downloads return structured absolute paths, file sizes and media types. Transcripts retain their plain-text interface; the analysis tool supplies timestamped segments. Search's `total` is unknown (`null`), and its next offset is determined by looking ahead one result.
+
+## Configuration
+
+| Variable | Default / purpose |
+|---|---|
+| `YTDLP_DOWNLOADS_DIR` | `~/Downloads`; created if missing |
+| `YTDLP_CACHE_DIR` | `yt-dlp-mcp-cache` under the OS temporary directory |
+| `YTDLP_DEFAULT_RESOLUTION` | `720p` |
+| `YTDLP_DEFAULT_AUDIO_FORMAT` | `m4a` |
+| `YTDLP_DEFAULT_SUBTITLE_LANG` | `en` |
+| `YTDLP_CHARACTER_LIMIT` | `25000`; text/metadata budget |
+| `YTDLP_MAX_TRANSCRIPT_LENGTH` | `50000` characters |
+| `YTDLP_TIMEOUT_MS` | `300000` per subprocess |
+| `YTDLP_MAX_OUTPUT_BYTES` | `16777216` buffered stdout bytes; stderr keeps a bounded tail |
+| `YTDLP_MAX_ANALYSIS_SECONDS` | `7200` |
+| `YTDLP_MAX_ANALYSIS_BYTES` | `268435456` |
+| `YTDLP_WHISPER_MODEL` | `base` |
+| `YTDLP_BINARY`, `YTDLP_FFMPEG_BINARY`, `YTDLP_FFPROBE_BINARY`, `YTDLP_WHISPER_BINARY` | Optional absolute executable paths |
+| `YTDLP_COOKIES_FROM_BROWSER` | Browser/profile, for example `firefox` or `chrome:Profile 1` |
+| `YTDLP_COOKIES_FILE` | Netscape cookie file; takes precedence over browser extraction |
+
+Cookie access remains local. Browser encryption/locking on Windows can prevent extraction. See [cookie configuration](docs/cookies.md). Keep a recent yt-dlp because platform extractors change frequently.
+
+Processes are cancelled when the client cancels a request, and timed-out process trees are terminated. Clients that request progress notifications receive progress messages. Certificate verification stays enabled and user yt-dlp configuration is ignored for predictable tool behavior.
+
+## Development and verification
+
+```sh
+npm ci
+npm run build
+npm test
+npm run test:smoke
 ```
 
-### Comment Markdown Tree
-Useful for LLM analysis when reply context matters:
-```markdown
-# AI-Ready Comment Threads
+Default tests use fixtures and exercise regressions, date filtering, pagination, partial failures, transcription fallback, timeouts and cancellation. `test:smoke` additionally requires yt-dlp/FFmpeg/ffprobe: it creates a synthetic video, serves it over localhost, starts the MCP server and checks real downloads and image results. It does not depend on a public video platform.
 
-source_title: "Sample Video"
-comments_detected: 20
-root_threads: 6
-reply_comments: 14
-
-## Threads
-
-### Thread 1
-
-- comment_id: "abc123"
-  parent_id: "root"
-  depth: 0
-  reply_count: 2
-  text:
-    | Root comment text
-  - comment_id: "reply456"
-    parent_id: "abc123"
-    depth: 1
-    reply_count: 0
-    text:
-      | Reply text
-```
-
-### Comment Limits
-YouTube comment extraction supports the full extractor tuple:
-```text
-youtube:comment_sort=<sort>;max_comments=<total>,<parents>,<replies>,<repliesPerThread>,<depth>
-```
-
-Examples:
-- Default behavior: `maxComments=20` yields `max_comments=20,20,20,20,2`
-- Root-only comments: `maxDepth=1`, `maxRepliesPerThread=0`
-- Limited branching: `maxReplies=40`, `maxRepliesPerThread=5`, `maxDepth=2`
-
----
-
-## 🔒 Privacy & Security
-
-- **No Tracking**: Direct downloads, no analytics
-- **Input Validation**: Zod schemas prevent injection
-- **URL Validation**: Strict URL format checking
-- **Character Limits**: Prevents context overflow attacks
-- **Read-Only by Default**: Most tools don't modify system state
-
----
-
-## 🤝 Contributing
-
-Contributions are welcome! Please check out our [Contributing Guide](./docs/contributing.md).
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
----
-
-## 📝 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
----
-
-## 🙏 Acknowledgments
-
-- [yt-dlp](https://github.com/yt-dlp/yt-dlp) - The amazing video extraction tool
-- [Anthropic](https://www.anthropic.com/) - For the Model Context Protocol
-- [Dive](https://github.com/OpenAgentPlatform/Dive) - MCP-compatible AI platform
-
----
-
-## 📚 Related Projects
-
-- [MCP Servers](https://github.com/modelcontextprotocol/servers) - Official MCP server implementations
-- [yt-dlp](https://github.com/yt-dlp/yt-dlp) - Command-line video downloader
-- [Dive Desktop](https://github.com/OpenAgentPlatform/Dive) - AI agent platform
-
----
-
-<div align="center">
-
-[⬆ Back to Top](#-yt-dlp-mcp)
-
-</div>
+`npm run test:integration` opts into the older live-platform tests. Public videos, captions, authentication and network availability make those checks environment-dependent. Windows/Linux CI runs the build and offline unit suite.

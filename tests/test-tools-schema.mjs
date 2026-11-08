@@ -36,13 +36,18 @@ const EXPECTED_TOOLS = [
   'ytdlp_get_video_metadata_summary',
   'ytdlp_list_subtitle_languages',
   'ytdlp_search_videos',
+  'ytdlp_analyze_video',
+  'ytdlp_get_frame',
+  'ytdlp_list_creator_videos',
+  'ytdlp_download_creator_videos',
+  'ytdlp_diagnostics',
 ];
 
 const failures = [];
 function fail(msg) { failures.push(msg); console.log(`  ✗ ${msg}`); }
 function pass(msg) { console.log(`  ✓ ${msg}`); }
 
-const child = spawn('node', [SERVER_PATH], { stdio: ['pipe', 'pipe', 'pipe'] });
+const child = spawn(process.execPath, [SERVER_PATH], { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, NODE_ENV: 'test' } });
 
 let stdoutBuf = '';
 const pending = new Map();
@@ -142,7 +147,7 @@ async function main() {
       continue;
     }
     const propCount = Object.keys(tool.inputSchema.properties).length;
-    if (propCount === 0) {
+    if (propCount === 0 && tool.name !== 'ytdlp_diagnostics') {
       fail(`${ctx} inputSchema.properties is empty`);
       continue;
     }

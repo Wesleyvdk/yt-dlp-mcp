@@ -1,5 +1,7 @@
 # Search Feature Demo
 
+For the current source-checkout setup, all 15 MCP tools and profile/date workflows, see [README](../README.md) and [Video workflows](video-workflows.md). Registry installation examples apply only after publishing this fork.
+
 The search functionality has been successfully added to yt-dlp-mcp! This feature allows you to search for videos on YouTube using keywords and get formatted results with video information.
 
 ## New Tool: `search_videos`

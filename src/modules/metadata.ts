@@ -1,8 +1,9 @@
 import type { Config } from "../config.js";
-import { getCookieArgs } from "../config.js";
+import { getYtdlpArgs } from "../config.js";
 import {
   _spawnPromise,
-  validateUrl
+    validateUrl,
+    boundedJson
 } from "./utils.js";
 
 /**
@@ -156,11 +157,11 @@ export async function getVideoMetadata(
   }
 
   const args = [
+    "--no-playlist",
     "--dump-json",
     "--no-warnings",
-    "--no-check-certificate",
-    ...(_config ? getCookieArgs(_config) : []),
-    url
+    ...(_config ? getYtdlpArgs(_config) : []),
+    "--", url
   ];
 
   try {
@@ -170,59 +171,15 @@ export async function getVideoMetadata(
     // Parse the JSON output
     const metadata: VideoMetadata = JSON.parse(output);
 
-    // If specific fields are requested, filter the metadata
-    if (fields !== undefined && fields.length >= 0) {
-      const filteredMetadata: Partial<VideoMetadata> & { _truncated?: boolean; _message?: string } = {};
-
+    const selected: Record<string, unknown> = {};
+    if (fields !== undefined) {
       for (const field of fields) {
-        if (metadata.hasOwnProperty(field)) {
-          filteredMetadata[field as keyof VideoMetadata] = metadata[field as keyof VideoMetadata];
-        }
+        if (Object.hasOwn(metadata, field)) selected[field] = metadata[field];
       }
-
-      let result = JSON.stringify(filteredMetadata, null, 2);
-
-      // Check character limit
-      if (_config && result.length > _config.limits.characterLimit) {
-        // Add truncation info inside JSON before truncating
-        filteredMetadata._truncated = true;
-        filteredMetadata._message = "Response truncated. Specify fewer fields to see complete data.";
-        result = JSON.stringify(filteredMetadata, null, 2);
-
-        // If still too long, truncate the string content
-        if (result.length > _config.limits.characterLimit) {
-          result = result.substring(0, _config.limits.characterLimit) + '\n... }';
-        }
-      }
-
-      return result;
+    } else {
+      Object.assign(selected, metadata);
     }
-
-    // Return formatted JSON string with all metadata
-    let result = JSON.stringify(metadata, null, 2);
-
-    // Check character limit for full metadata
-    if (_config && result.length > _config.limits.characterLimit) {
-      // Try to return essential fields only
-      const essentialFields = ['id', 'title', 'description', 'channel', 'channel_id', 'uploader',
-                               'duration', 'duration_string', 'view_count', 'like_count',
-                               'upload_date', 'tags', 'categories', 'webpage_url'];
-      const essentialMetadata: Partial<VideoMetadata> & { _truncated?: boolean; _message?: string } = {};
-
-      for (const field of essentialFields) {
-        if (metadata.hasOwnProperty(field)) {
-          essentialMetadata[field as keyof VideoMetadata] = metadata[field as keyof VideoMetadata];
-        }
-      }
-
-      // Add truncation info inside the JSON object
-      essentialMetadata._truncated = true;
-      essentialMetadata._message = 'Full metadata truncated to essential fields. Use the "fields" parameter to request specific fields.';
-
-      result = JSON.stringify(essentialMetadata, null, 2);
-    }
-
-    return result;
+    return boundedJson(selected, _config?.limits.characterLimit ?? 25000);
 
   } catch (error) {
     if (error instanceof Error) {

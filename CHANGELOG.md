@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- Fall back to terminating the direct child on Windows when taskkill exits unsuccessfully, avoiding leaked timeout/cancellation processes.
+- Preserve the video's original audio on TikTok instead of selecting its separate full-length music track; invalidate older analysis cache entries.
+- Convert extracted video frames to full-range JPEG, including TikToks encoded with limited-range colour metadata.
+- Sample the video stream duration when TikTok's audio track extends past the final video frame; recheck cached durations and trim analysis audio to the video length.
+
+## [0.10.0] - 2026-10-31
+
+- Add timestamped MCP image results, individual frame inspection, a local media cache and optional CPU Whisper transcription when captions are unavailable.
+- Add bounded creator/profile listing and bulk downloads, inclusive upload-date ranges, raw-source pagination, missing-date resolution and per-video failure results.
+- Fix resolution defaults, non-YouTube resolution limits, output filename reporting, single-video playlist expansion, search pagination, JSON truncation and advertised environment limits.
+- Keep TLS verification enabled; bound process output and add timeouts, request cancellation and MCP progress notifications.
+- Make build/test scripts portable; separate live-platform checks from fixture tests and add Windows/Linux CI and a real local-video MCP smoke test.
+- Rename the maintained fork to @wesleyvdk/yt-dlp-mcp, retain upstream attribution and document source-based installation without assuming npm publication.
+
 ---
 
 ## [0.9.0] - 2026-05-21

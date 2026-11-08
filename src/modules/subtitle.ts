@@ -1,229 +1,93 @@
-import * as fs from "fs";
-import * as path from "path";
-import * as os from "os";
+import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import type { Config } from '../config.js';
-import { getCookieArgs } from '../config.js';
-import { _spawnPromise, validateUrl, cleanSubtitleToTranscript } from "./utils.js";
+import { getYtdlpArgs } from '../config.js';
+import { _spawnPromise, executionContext, validateUrl } from './utils.js';
+import { downloadMedia } from './media.js';
 
-/**
- * Lists all available subtitles for a video.
- *
- * @param url - The URL of the video
- * @param config - Configuration object (optional, for cookie support)
- * @returns Promise resolving to a string containing the list of available subtitles
- * @throws {Error} When URL is invalid or subtitle listing fails
- *
- * @example
- * ```typescript
- * try {
- *   const subtitles = await listSubtitles('https://youtube.com/watch?v=...', config);
- *   console.log('Available subtitles:', subtitles);
- * } catch (error) {
- *   console.error('Failed to list subtitles:', error);
- * }
- * ```
- */
+export interface TranscriptSegment { start: number; end: number; text: string; }
+export interface TranscriptData { source: 'captions' | 'whisper'; language: string; text: string; segments: TranscriptSegment[]; truncated: boolean; }
+export function parseSrt(content: string): TranscriptSegment[] {
+  const seconds = (stamp: string) => stamp.replace(',', '.').split(':').map(Number).reduce((total, value) => total * 60 + value, 0);
+  const result: TranscriptSegment[] = [];
+  for (const block of content.replace(/\r/g, '').split(/\n\s*\n/)) {
+    const match = block.match(/(\d{2,}:\d{2}:\d{2}[,.]\d{3})\s*-->\s*(\d{2,}:\d{2}:\d{2}[,.]\d{3})[^\n]*\n([\s\S]*)/);
+    if (!match) continue;
+    const text = match[3].replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
+    if (text) result.push({ start: seconds(match[1]), end: seconds(match[2]), text });
+  }
+  return result;
+}
+function limitTranscript(segments: TranscriptSegment[], source: TranscriptData['source'], language: string, config: Config): TranscriptData {
+  const included: TranscriptSegment[] = [];
+  let length = 0;
+  for (const segment of segments) {
+    const remaining = config.limits.maxTranscriptLength - length;
+    if (remaining <= 0) break;
+    const text = segment.text.slice(0, remaining);
+    included.push({ ...segment, text });
+    length += text.length + 1;
+    if (text.length < segment.text.length) break;
+  }
+  return { source, language, text: included.map(segment => segment.text).join(' '), segments: included,
+    truncated: included.length < segments.length || included.some((segment, index) => segment.text !== segments[index].text) };
+}
 export async function listSubtitles(url: string, config?: Config): Promise<string> {
-  if (!validateUrl(url)) {
-    throw new Error('Invalid or unsupported URL format. Please provide a valid video URL (e.g., https://youtube.com/watch?v=...)');
-  }
-
-  try {
-    const args = [
-      '--ignore-config',
-      '--list-subs',
-      '--write-auto-sub',
-      '--skip-download',
-      '--verbose',
-      ...(config ? getCookieArgs(config) : []),
-      url
-    ];
-    const output = await _spawnPromise('yt-dlp', args);
-    return output;
-  } catch (error) {
-    if (error instanceof Error) {
-      if (error.message.includes("Unsupported URL") || error.message.includes("not supported")) {
-        throw new Error(`Unsupported platform or video URL: ${url}. Ensure the URL is from a supported platform like YouTube.`);
-      }
-      if (error.message.includes("Video unavailable") || error.message.includes("private")) {
-        throw new Error(`Video is unavailable or private: ${url}. Check the URL and video privacy settings.`);
-      }
-      if (error.message.includes("network") || error.message.includes("Connection")) {
-        throw new Error("Network error while fetching subtitles. Check your internet connection and retry.");
-      }
-    }
-    throw error;
-  }
+  if (!validateUrl(url)) throw new Error('Invalid HTTP(S) video URL');
+  return _spawnPromise('yt-dlp', ['--no-playlist', '--list-subs', '--skip-download', ...(config ? getYtdlpArgs(config) : []), '--', url]);
 }
-
-/**
- * Downloads subtitles for a video in the specified language.
- * 
- * @param url - The URL of the video
- * @param language - Language code (e.g., 'en', 'zh-Hant', 'ja')
- * @param config - Configuration object
- * @returns Promise resolving to the subtitle content
- * @throws {Error} When URL is invalid, language is not available, or download fails
- * 
- * @example
- * ```typescript
- * try {
- *   // Download English subtitles
- *   const enSubs = await downloadSubtitles('https://youtube.com/watch?v=...', 'en', config);
- *   console.log('English subtitles:', enSubs);
- * 
- *   // Download Traditional Chinese subtitles
- *   const zhSubs = await downloadSubtitles('https://youtube.com/watch?v=...', 'zh-Hant', config);
- *   console.log('Chinese subtitles:', zhSubs);
- * } catch (error) {
- *   if (error.message.includes('No subtitle files found')) {
- *     console.warn('No subtitles available in the requested language');
- *   } else {
- *     console.error('Failed to download subtitles:', error);
- *   }
- * }
- * ```
- */
-export async function downloadSubtitles(
-  url: string,
-  language: string,
-  config: Config
-): Promise<string> {
-  if (!validateUrl(url)) {
-    throw new Error('Invalid or unsupported URL format. Please provide a valid video URL (e.g., https://youtube.com/watch?v=...)');
-  }
-
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), config.file.tempDirPrefix));
-
-  try {
-    await _spawnPromise('yt-dlp', [
-      '--ignore-config',
-      '--write-sub',
-      '--write-auto-sub',
-      '--sub-lang', language,
-      '--skip-download',
-      '--output', path.join(tempDir, '%(title)s.%(ext)s'),
-      ...getCookieArgs(config),
-      url
-    ]);
-
-    const subtitleFiles = fs.readdirSync(tempDir)
-      .filter(file => file.endsWith('.vtt'));
-
-    if (subtitleFiles.length === 0) {
-      throw new Error(`No subtitle files found for language '${language}'. Use ytdlp_list_subtitle_languages to check available options.`);
-    }
-
-    let output = '';
-    for (const file of subtitleFiles) {
-      output += fs.readFileSync(path.join(tempDir, file), 'utf8');
-    }
-
-    // Check character limit
-    if (output.length > config.limits.characterLimit) {
-      output = output.substring(0, config.limits.characterLimit);
-      output += "\n\n⚠️ Subtitle content truncated due to size. Consider using ytdlp_download_transcript for plain text.";
-    }
-
-    return output;
-  } catch (error) {
-    if (error instanceof Error) {
-      if (error.message.includes("Unsupported URL") || error.message.includes("not supported")) {
-        throw new Error(`Unsupported platform or video URL: ${url}. Ensure the URL is from a supported platform like YouTube.`);
-      }
-      if (error.message.includes("Video unavailable") || error.message.includes("private")) {
-        throw new Error(`Video is unavailable or private: ${url}. Check the URL and video privacy settings.`);
-      }
-      if (error.message.includes("network") || error.message.includes("Connection")) {
-        throw new Error("Network error while downloading subtitles. Check your internet connection and retry.");
-      }
-    }
-    throw error;
-  } finally {
-    fs.rmSync(tempDir, { recursive: true, force: true });
-  }
+async function fetchSubtitles(url: string, language: string, config: Config, directory: string, format: 'srt' | 'vtt'): Promise<string[]> {
+  if (!validateUrl(url)) throw new Error('Invalid HTTP(S) video URL');
+  await _spawnPromise('yt-dlp', [
+    '--no-playlist', '--skip-download', '--write-subs', '--write-auto-subs',
+    '--sub-langs', language, '--sub-format', `${format}/best`, '--convert-subs', format,
+    '--output', path.join(directory, 'captions.%(ext)s'), ...getYtdlpArgs(config), '--', url
+  ]);
+  return (await fs.readdir(directory)).filter(file => file.endsWith(`.${format}`)).map(file => path.join(directory, file));
 }
-
-/**
- * Downloads and cleans subtitles to produce a plain text transcript.
- * 
- * @param url - The URL of the video
- * @param language - Language code (e.g., 'en', 'zh-Hant', 'ja')
- * @param config - Configuration object
- * @returns Promise resolving to the cleaned transcript text
- * @throws {Error} When URL is invalid, language is not available, or download fails
- * 
- * @example
- * ```typescript
- * try {
- *   const transcript = await downloadTranscript('https://youtube.com/watch?v=...', 'en', config);
- *   console.log('Transcript:', transcript);
- * } catch (error) {
- *   console.error('Failed to download transcript:', error);
- * }
- * ```
- */
-export async function downloadTranscript(
-  url: string,
-  language: string,
-  config: Config
-): Promise<string> {
-  if (!validateUrl(url)) {
-    throw new Error('Invalid or unsupported URL format. Please provide a valid video URL (e.g., https://youtube.com/watch?v=...)');
-  }
-
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), config.file.tempDirPrefix));
-
+export async function downloadSubtitles(url: string, language: string, config: Config): Promise<string> {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), config.file.tempDirPrefix));
   try {
-    await _spawnPromise('yt-dlp', [
-      '--ignore-config',
-      '--skip-download',
-      '--write-subs',
-      '--write-auto-subs',
-      '--sub-lang', language,
-      '--sub-format', 'ttml',
-      '--convert-subs', 'srt',
-      '--output', path.join(tempDir, 'transcript.%(ext)s'),
-      ...getCookieArgs(config),
-      url
-    ]);
-
-    const srtFiles = fs.readdirSync(tempDir)
-      .filter(file => file.endsWith('.srt'));
-
-    if (srtFiles.length === 0) {
-      throw new Error(`No subtitle files found for transcript generation in language '${language}'. Use ytdlp_list_subtitle_languages to check available options.`);
-    }
-
-    let transcriptContent = '';
-    for (const file of srtFiles) {
-      const srtContent = fs.readFileSync(path.join(tempDir, file), 'utf8');
-      transcriptContent += cleanSubtitleToTranscript(srtContent) + ' ';
-    }
-
-    transcriptContent = transcriptContent.trim();
-
-    // Transcripts can be larger than standard limit
-    if (transcriptContent.length > config.limits.maxTranscriptLength) {
-      const truncated = transcriptContent.substring(0, config.limits.maxTranscriptLength);
-      transcriptContent = truncated + "\n\n⚠️ Transcript truncated due to length. This is a partial transcript.";
-    }
-
-    return transcriptContent;
+    const files = await fetchSubtitles(url, language, config, directory, 'vtt');
+    if (!files.length) throw new Error(`No subtitle files found for language '${language}'`);
+    const content = (await Promise.all(files.map(file => fs.readFile(file, 'utf8')))).join('\n');
+    return content.length > config.limits.characterLimit ? content.slice(0, config.limits.characterLimit) + '\n[Subtitles truncated]' : content;
+  } finally { await fs.rm(directory, { recursive: true, force: true }); }
+}
+export async function transcribeMediaFile(filename: string, language: string, config: Config, duration?: number): Promise<TranscriptData> {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), config.file.tempDirPrefix));
+  try {
+    const audio = path.join(directory, 'speech.wav');
+    await _spawnPromise('ffmpeg', ['-nostdin', '-v', 'error', '-y', '-i', filename,
+      ...(duration === undefined ? [] : ['-t', String(duration)]), '-vn', '-ac', '1', '-ar', '16000', audio]);
+    await _spawnPromise('whisper', [audio, '--model', config.analysis.whisperModel, '--device', 'cpu', '--fp16', 'False',
+      '--model_dir', path.join(config.analysis.cacheDir, 'whisper-models'),
+      '--language', language.split('-')[0], '--output_format', 'json', '--output_dir', directory, '--verbose', 'False']);
+    const data = JSON.parse(await fs.readFile(path.join(directory, 'speech.json'), 'utf8'));
+    if (!Array.isArray(data.segments)) throw new Error('Whisper returned no timestamped segments');
+    const segments = data.segments.filter((segment: Record<string, unknown>) =>
+      typeof segment.start === 'number' && typeof segment.end === 'number' && typeof segment.text === 'string'
+    ).map((segment: { start: number; end: number; text: string }) => ({ start: segment.start, end: segment.end, text: segment.text.trim() }));
+    return limitTranscript(segments, 'whisper', data.language || language, config);
   } catch (error) {
-    if (error instanceof Error) {
-      if (error.message.includes("Unsupported URL") || error.message.includes("not supported")) {
-        throw new Error(`Unsupported platform or video URL: ${url}. Ensure the URL is from a supported platform like YouTube.`);
-      }
-      if (error.message.includes("Video unavailable") || error.message.includes("private")) {
-        throw new Error(`Video is unavailable or private: ${url}. Check the URL and video privacy settings.`);
-      }
-      if (error.message.includes("network") || error.message.includes("Connection")) {
-        throw new Error("Network error while downloading transcript. Check your internet connection and retry.");
-      }
+    executionContext.getStore()?.signal?.throwIfAborted();
+    throw new Error(`Local speech recognition failed. Install openai-whisper and its model, or set YTDLP_WHISPER_BINARY. ${String(error)}`);
+  } finally { await fs.rm(directory, { recursive: true, force: true }); }
+}
+export async function getTranscriptData(url: string, language: string, config: Config, mediaPath?: string, duration?: number): Promise<TranscriptData> {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), config.file.tempDirPrefix));
+  try {
+    const files = await fetchSubtitles(url, language, config, directory, 'srt');
+    if (files.length) {
+      const segments = parseSrt((await Promise.all(files.map(file => fs.readFile(file, 'utf8')))).join('\n\n'));
+      if (segments.length) return limitTranscript(segments, 'captions', language, config);
     }
-    throw error;
-  } finally {
-    fs.rmSync(tempDir, { recursive: true, force: true });
-  }
-} 
+    if (!mediaPath) mediaPath = (await downloadMedia(url, config, { audio: true, directory, maxBytes: config.analysis.maxFileBytes })).path;
+    return await transcribeMediaFile(mediaPath, language, config, duration);
+  } finally { await fs.rm(directory, { recursive: true, force: true }); }
+}
+export async function downloadTranscript(url: string, language: string, config: Config): Promise<string> {
+  const transcript = await getTranscriptData(url, language, config);
+  return transcript.text + (transcript.truncated ? '\n[Partial transcript: character limit reached]' : '');
+}
