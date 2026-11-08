@@ -39,3 +39,11 @@ CLAUDE.md
 .idea/
 plan/
 dist/
+*.local.json
+*.local.toml
+.cache/
+downloads/
+.tools/
+.venv/
+/.mcp.json
+/.codex/config.toml

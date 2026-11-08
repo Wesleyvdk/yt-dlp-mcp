@@ -13,7 +13,7 @@ describe('downloadAudio', () => {
     ...CONFIG,
     file: {
       ...CONFIG.file,
-      downloadsDir: path.join(os.tmpdir(), 'yt-dlp-test-downloads'),
+      downloadsDir: fs.mkdtempSync(path.join(os.tmpdir(), 'yt-dlp-test-downloads-')),
       tempDirPrefix: 'yt-dlp-test-'
     }
   };

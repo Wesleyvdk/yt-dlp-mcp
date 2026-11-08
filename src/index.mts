@@ -2,22 +2,24 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import type { CallToolResult, ServerRequest, ServerNotification } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
+import type { RequestHandlerExtra } from "@modelcontextprotocol/sdk/shared/protocol.js";
 
 import * as os from "os";
 import * as fs from "fs";
 import * as path from "path";
 import { CONFIG } from "./config.js";
-import { _spawnPromise, safeCleanup } from "./modules/utils.js";
-import { downloadVideo } from "./modules/video.js";
-import { downloadAudio } from "./modules/audio.js";
+import { _spawnPromise, safeCleanup, executionContext } from "./modules/utils.js";
+import { downloadMedia } from "./modules/media.js";
+import { analyzeVideo, getFrame, diagnostics } from "./modules/analysis.js";
+import { listCreatorVideos, downloadCreatorVideos } from "./modules/profile.js";
 import { listSubtitles, downloadSubtitles, downloadTranscript } from "./modules/subtitle.js";
 import { searchVideos } from "./modules/search.js";
 import { getVideoMetadata, getVideoMetadataSummary } from "./modules/metadata.js";
 import { getVideoComments, getVideoCommentsSummary } from "./modules/comments.js";
 
-const VERSION = '0.9.0';
+const VERSION = '0.10.0';
 
 // Response format enum
 enum ResponseFormat {
@@ -49,7 +51,7 @@ const SearchVideosInput = {
     .describe("Maximum number of results to return (1-50)"),
   offset: z.coerce.number()
     .int("Must be a whole number")
-    .min(0, "Cannot be negative")
+    .min(0, "Cannot be negative").max(10000)
     .default(0)
     .describe("Number of results to skip for pagination"),
   response_format: z.nativeEnum(ResponseFormat)
@@ -62,13 +64,13 @@ const SearchVideosInput = {
 
 const ListSubtitleLanguagesInput = {
   url: z.string()
-    .url("Must be a valid URL")
+    .url("Must be a valid URL").refine(value => /^https?:\/\//i.test(value), "HTTP(S) URLs only")
     .describe("URL of the video"),
 };
 
 const DownloadVideoSubtitlesInput = {
   url: z.string()
-    .url("Must be a valid URL")
+    .url("Must be a valid URL").refine(value => /^https?:\/\//i.test(value), "HTTP(S) URLs only")
     .describe("URL of the video"),
   language: z.string()
     .regex(/^[a-z]{2,3}(-[A-Za-z]{2,4})?$/, "Invalid language code format")
@@ -78,7 +80,7 @@ const DownloadVideoSubtitlesInput = {
 
 const DownloadVideoInput = {
   url: z.string()
-    .url("Must be a valid URL")
+    .url("Must be a valid URL").refine(value => /^https?:\/\//i.test(value), "HTTP(S) URLs only")
     .describe("URL of the video"),
   resolution: z.enum(["480p", "720p", "1080p", "best"])
     .optional()
@@ -95,13 +97,13 @@ const DownloadVideoInput = {
 
 const DownloadAudioInput = {
   url: z.string()
-    .url("Must be a valid URL")
+    .url("Must be a valid URL").refine(value => /^https?:\/\//i.test(value), "HTTP(S) URLs only")
     .describe("URL of the video"),
 };
 
 const DownloadTranscriptInput = {
   url: z.string()
-    .url("Must be a valid URL")
+    .url("Must be a valid URL").refine(value => /^https?:\/\//i.test(value), "HTTP(S) URLs only")
     .describe("URL of the video"),
   language: z.string()
     .regex(/^[a-z]{2,3}(-[A-Za-z]{2,4})?$/, "Invalid language code format")
@@ -111,7 +113,7 @@ const DownloadTranscriptInput = {
 
 const GetVideoMetadataInput = {
   url: z.string()
-    .url("Must be a valid URL")
+    .url("Must be a valid URL").refine(value => /^https?:\/\//i.test(value), "HTTP(S) URLs only")
     .describe("URL of the video"),
   fields: z.array(z.string())
     .optional()
@@ -120,13 +122,13 @@ const GetVideoMetadataInput = {
 
 const GetVideoMetadataSummaryInput = {
   url: z.string()
-    .url("Must be a valid URL")
+    .url("Must be a valid URL").refine(value => /^https?:\/\//i.test(value), "HTTP(S) URLs only")
     .describe("URL of the video"),
 };
 
 const GetVideoCommentsInput = {
   url: z.string()
-    .url("Must be a valid URL")
+    .url("Must be a valid URL").refine(value => /^https?:\/\//i.test(value), "HTTP(S) URLs only")
     .describe("URL of the video"),
   maxComments: z.coerce.number()
     .int("Must be a whole number")
@@ -171,7 +173,7 @@ const GetVideoCommentsInput = {
 
 const GetVideoCommentsSummaryInput = {
   url: z.string()
-    .url("Must be a valid URL")
+    .url("Must be a valid URL").refine(value => /^https?:\/\//i.test(value), "HTTP(S) URLs only")
     .describe("URL of the video"),
   maxComments: z.coerce.number()
     .int("Must be a whole number")
@@ -189,16 +191,11 @@ const GetVideoCommentsSummaryInput = {
  * @throws {Error} when configuration is invalid
  */
 async function validateConfig(): Promise<void> {
-  // Check downloads directory
-  if (!fs.existsSync(CONFIG.file.downloadsDir)) {
-    throw new Error(`Downloads directory does not exist: ${CONFIG.file.downloadsDir}`);
-  }
+  fs.mkdirSync(CONFIG.file.downloadsDir, { recursive: true });
 
   // Check downloads directory permissions
   try {
-    const testFile = path.join(CONFIG.file.downloadsDir, '.write-test');
-    fs.writeFileSync(testFile, '');
-    fs.unlinkSync(testFile);
+    fs.accessSync(CONFIG.file.downloadsDir, fs.constants.W_OK);
   } catch (error) {
     throw new Error(`No write permission in downloads directory: ${CONFIG.file.downloadsDir}`);
   }
@@ -247,22 +244,26 @@ async function initialize(): Promise<void> {
 /**
  * Wrap a tool action in unified error handling, returning a CallToolResult.
  */
-async function handleToolExecution<T>(
-  action: () => Promise<T>,
-  errorPrefix: string
-): Promise<CallToolResult> {
-  try {
-    const result = await action();
-    return {
-      content: [{ type: "text", text: String(result) }]
-    };
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    return {
-      content: [{ type: "text", text: `${errorPrefix}: ${errorMessage}` }],
-      isError: true
-    };
-  }
+type ToolExtra = RequestHandlerExtra<ServerRequest, ServerNotification>;
+async function handleToolExecution<T>(action: () => Promise<T>, errorPrefix: string, extra?: ToolExtra): Promise<CallToolResult> {
+  let progress = 0;
+  return executionContext.run({ signal: extra?.signal, progress: message => {
+    const token = extra?._meta?.progressToken;
+    if (token !== undefined) void extra!.sendNotification({ method: "notifications/progress", params: { progressToken: token, progress: ++progress, message } }).catch(() => {});
+  } }, async () => {
+    try {
+      const result = await action();
+      if (result && typeof result === 'object' && 'content' in result) return result as CallToolResult;
+      let structured: Record<string, unknown> | undefined;
+      if (result && typeof result === 'object') structured = result as Record<string, unknown>;
+      else if (typeof result === 'string' && result.trim().startsWith('{')) {
+        try { structured = JSON.parse(result); } catch { /* Plain text remains readable by older clients. */ }
+      }
+      return { content: [{ type: 'text', text: typeof result === 'string' ? result : JSON.stringify(result) }], ...(structured ? { structuredContent: structured } : {}) };
+    } catch (error) {
+      return { content: [{ type: 'text', text: errorPrefix + ': ' + (error instanceof Error ? error.message : String(error)) }], isError: true };
+    }
+  });
 }
 
 const server = new McpServer(
@@ -310,10 +311,10 @@ Error Handling:
       openWorldHint: true
     }
   },
-  async ({ query, maxResults, offset, response_format, uploadDateFilter }) =>
+  async ({ query, maxResults, offset, response_format, uploadDateFilter }, extra) =>
     handleToolExecution(
       () => searchVideos(query, maxResults, offset, response_format, CONFIG, uploadDateFilter),
-      "Error searching videos"
+      "Error searching videos", extra
     )
 );
 
@@ -347,10 +348,10 @@ Error Handling:
       openWorldHint: true
     }
   },
-  async ({ url }) =>
+  async ({ url }, extra) =>
     handleToolExecution(
       () => listSubtitles(url, CONFIG),
-      "Error listing subtitle languages"
+      "Error listing subtitle languages", extra
     )
 );
 
@@ -386,10 +387,10 @@ Error Handling:
       openWorldHint: true
     }
   },
-  async ({ url, language }) =>
+  async ({ url, language }, extra) =>
     handleToolExecution(
       () => downloadSubtitles(url, language || CONFIG.download.defaultSubtitleLanguage, CONFIG),
-      "Error downloading subtitles"
+      "Error downloading subtitles", extra
     )
 );
 
@@ -427,10 +428,10 @@ Error Handling:
       openWorldHint: true
     }
   },
-  async ({ url, resolution, startTime, endTime }) =>
+  async ({ url, resolution, startTime, endTime }, extra) =>
     handleToolExecution(
-      () => downloadVideo(url, CONFIG, resolution, startTime, endTime),
-      "Error downloading video"
+      () => downloadMedia(url, CONFIG, { resolution, startTime, endTime }),
+      "Error downloading video", extra
     )
 );
 
@@ -467,10 +468,10 @@ Error Handling:
       openWorldHint: true
     }
   },
-  async ({ url }) =>
+  async ({ url }, extra) =>
     handleToolExecution(
-      () => downloadAudio(url, CONFIG),
-      "Error downloading audio"
+      () => downloadMedia(url, CONFIG, { audio: true }),
+      "Error downloading audio", extra
     )
 );
 
@@ -507,10 +508,10 @@ Error Handling:
       openWorldHint: true
     }
   },
-  async ({ url, language }) =>
+  async ({ url, language }, extra) =>
     handleToolExecution(
       () => downloadTranscript(url, language || CONFIG.download.defaultSubtitleLanguage, CONFIG),
-      "Error downloading transcript"
+      "Error downloading transcript", extra
     )
 );
 
@@ -551,10 +552,10 @@ Error Handling:
       openWorldHint: true
     }
   },
-  async ({ url, fields }) =>
+  async ({ url, fields }, extra) =>
     handleToolExecution(
       () => getVideoMetadata(url, fields, CONFIG),
-      "Error extracting video metadata"
+      "Error extracting video metadata", extra
     )
 );
 
@@ -591,10 +592,10 @@ Error Handling:
       openWorldHint: true
     }
   },
-  async ({ url }) =>
+  async ({ url }, extra) =>
     handleToolExecution(
       () => getVideoMetadataSummary(url, CONFIG),
-      "Error generating video metadata summary"
+      "Error generating video metadata summary", extra
     )
 );
 
@@ -659,7 +660,7 @@ Error Handling:
       openWorldHint: true
     }
   },
-  async ({ url, maxComments, sortOrder, view, responseFormat, maxParents, maxReplies, maxRepliesPerThread, maxDepth }) =>
+  async ({ url, maxComments, sortOrder, view, responseFormat, maxParents, maxReplies, maxRepliesPerThread, maxDepth }, extra) =>
     handleToolExecution(
       () => getVideoComments(url, maxComments, sortOrder, CONFIG, {
         view,
@@ -669,7 +670,7 @@ Error Handling:
         maxRepliesPerThread,
         maxDepth,
       }),
-      "Error extracting video comments"
+      "Error extracting video comments", extra
     )
 );
 
@@ -708,12 +709,46 @@ Error Handling:
       openWorldHint: true
     }
   },
-  async ({ url, maxComments, view }) =>
+  async ({ url, maxComments, view }, extra) =>
     handleToolExecution(
       () => getVideoCommentsSummary(url, maxComments, CONFIG, { view }),
-      "Error generating video comments summary"
+      "Error generating video comments summary", extra
     )
 );
+
+const VideoUrl = z.string().url().refine(value => /^https?:\/\//i.test(value), 'HTTP(S) URLs only');
+const ProfileInput = {
+  url: VideoUrl.describe('TikTok creator profile, YouTube channel/videos tab, or supported playlist URL'),
+  limit: z.number().int().min(1).max(50).default(10).describe('Maximum matching videos to return'),
+  offset: z.number().int().min(0).max(10000).default(0).describe('Raw source offset; use nextOffset from the previous result'),
+  scanLimit: z.number().int().min(1).max(200).default(50).describe('Maximum source entries to inspect per call; date filtering may require more pages'),
+  dateFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe('Inclusive upload date, YYYY-MM-DD'),
+  dateTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe('Inclusive upload date, YYYY-MM-DD')
+};
+server.registerTool('ytdlp_list_creator_videos', {
+  description: 'List a bounded page of a creator profile or channel. Supports inclusive between-date filters. Does not download videos. Dates missing from flat listings are resolved individually; undated entries are excluded when filtering. Follow nextOffset until hasMore is false; a page may be empty while more entries remain.',
+  inputSchema: ProfileInput,
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true }
+}, async (input, extra) => handleToolExecution(() => listCreatorVideos(input.url, CONFIG, input), 'Error listing creator videos', extra));
+server.registerTool('ytdlp_download_creator_videos', {
+  description: 'Download a bounded batch of videos from a creator profile/channel, optionally between inclusive upload dates. Returns actual file paths and per-video errors. Maximum 20 videos per call; use nextOffset for subsequent batches.',
+  inputSchema: { ...ProfileInput, limit: z.number().int().min(1).max(20).default(10), resolution: z.enum(['480p', '720p', '1080p', 'best']).optional() },
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true }
+}, async (input, extra) => handleToolExecution(() => downloadCreatorVideos(input.url, CONFIG, input), 'Error downloading creator videos', extra));
+server.registerTool('ytdlp_analyze_video', {
+  description: 'Inspect a video visually: downloads/caches it locally and returns timestamped JPEG image content plus captions, or optional local Whisper transcription. The calling vision-capable agent interprets the images. Frames are uniformly sampled; use a narrow range or ytdlp_get_frame for brief details. Missing transcription returns warnings and still supplies images.',
+  inputSchema: { url: VideoUrl, maxFrames: z.number().int().min(1).max(16).default(8), startSeconds: z.number().min(0).optional(), endSeconds: z.number().positive().optional(), language: z.string().regex(/^[a-z]{2,3}(-[A-Za-z]{2,4})?$/).optional(), includeTranscript: z.boolean().default(true) },
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true }
+}, async (input, extra) => handleToolExecution(() => analyzeVideo(input.url, CONFIG, input), 'Error analyzing video', extra));
+server.registerTool('ytdlp_get_frame', {
+  description: 'Inspect a specific moment in a video. Returns one JPEG image as MCP image content and its exact timestamp. Reuses the local video cache.',
+  inputSchema: { url: VideoUrl, timestamp: z.number().min(0).describe('Timestamp in seconds, including fractions') },
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true }
+}, async ({ url, timestamp }, extra) => handleToolExecution(() => getFrame(url, timestamp, CONFIG), 'Error extracting frame', extra));
+server.registerTool('ytdlp_diagnostics', {
+  description: 'Check local yt-dlp, FFmpeg, ffprobe, Deno and optional Whisper availability. Reports missing tools with actionable errors.',
+  inputSchema: {}, annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }
+}, async (_input, extra) => handleToolExecution(() => diagnostics(), 'Error checking dependencies', extra));
 
 /**
  * Starts the server using Stdio transport.

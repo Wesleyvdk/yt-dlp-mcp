@@ -1,5 +1,7 @@
 # API Reference
 
+For the current source-checkout setup, all 15 MCP tools and profile/date workflows, see [README](../README.md) and [Video workflows](video-workflows.md). Registry installation examples apply only after publishing this fork.
+
 ## Video Operations
 
 ### downloadVideo(url: string, config?: Config, resolution?: string, startTime?: string, endTime?: string): Promise<string>
@@ -18,7 +20,7 @@ Downloads a video from the specified URL with optional trimming.
 
 **Example:**
 ```javascript
-import { downloadVideo } from '@kevinwatt/yt-dlp-mcp';
+import { downloadVideo } from '@wesleyvdk/yt-dlp-mcp';
 
 // Download with default settings
 const result = await downloadVideo('https://www.youtube.com/watch?v=jNQXAC9IVRw');
@@ -68,7 +70,7 @@ Downloads audio from the specified URL in the best available quality.
 
 **Example:**
 ```javascript
-import { downloadAudio } from '@kevinwatt/yt-dlp-mcp';
+import { downloadAudio } from '@wesleyvdk/yt-dlp-mcp';
 
 const result = await downloadAudio('https://www.youtube.com/watch?v=jNQXAC9IVRw');
 console.log(result);
@@ -88,7 +90,7 @@ Lists all available subtitles for a video.
 
 **Example:**
 ```javascript
-import { listSubtitles } from '@kevinwatt/yt-dlp-mcp';
+import { listSubtitles } from '@wesleyvdk/yt-dlp-mcp';
 
 const subtitles = await listSubtitles('https://www.youtube.com/watch?v=jNQXAC9IVRw');
 console.log(subtitles);
@@ -107,7 +109,7 @@ Downloads subtitles for a video in the specified language.
 
 **Example:**
 ```javascript
-import { downloadSubtitles } from '@kevinwatt/yt-dlp-mcp';
+import { downloadSubtitles } from '@wesleyvdk/yt-dlp-mcp';
 
 const subtitles = await downloadSubtitles(
   'https://www.youtube.com/watch?v=jNQXAC9IVRw',
@@ -131,7 +133,7 @@ Extract comprehensive video metadata using yt-dlp without downloading the conten
 
 **Example:**
 ```javascript
-import { getVideoMetadata } from '@kevinwatt/yt-dlp-mcp';
+import { getVideoMetadata } from '@wesleyvdk/yt-dlp-mcp';
 
 // Get all metadata
 const all = await getVideoMetadata('https://www.youtube.com/watch?v=jNQXAC9IVRw');
@@ -157,7 +159,7 @@ Get a human-readable summary of key video metadata fields.
 
 **Example:**
 ```javascript
-import { getVideoMetadataSummary } from '@kevinwatt/yt-dlp-mcp';
+import { getVideoMetadataSummary } from '@wesleyvdk/yt-dlp-mcp';
 
 const summary = await getVideoMetadataSummary('https://www.youtube.com/watch?v=jNQXAC9IVRw');
 console.log(summary);
@@ -194,7 +196,7 @@ Extract comments without downloading video content. Supports flat JSON, threaded
 
 **Example:**
 ```javascript
-import { getVideoComments } from '@kevinwatt/yt-dlp-mcp';
+import { getVideoComments } from '@wesleyvdk/yt-dlp-mcp';
 
 const flatJson = await getVideoComments(
   'https://www.youtube.com/watch?v=jNQXAC9IVRw'
@@ -235,7 +237,7 @@ Get a readable summary of comments. Can render either a flat sequence or grouped
 
 **Example:**
 ```javascript
-import { getVideoCommentsSummary } from '@kevinwatt/yt-dlp-mcp';
+import { getVideoCommentsSummary } from '@wesleyvdk/yt-dlp-mcp';
 
 const summary = await getVideoCommentsSummary(
   'https://www.youtube.com/watch?v=jNQXAC9IVRw',

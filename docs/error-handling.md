@@ -1,5 +1,7 @@
 # Error Handling Guide
 
+For the current source-checkout setup, all 15 MCP tools and profile/date workflows, see [README](../README.md) and [Video workflows](video-workflows.md). Registry installation examples apply only after publishing this fork.
+
 ## Common Errors
 
 ### Invalid URL
@@ -114,7 +116,7 @@ async function handleDownload(url, options = {}) {
 Always validate URLs before processing:
 
 ```javascript
-import { validateUrl, isYouTubeUrl } from '@kevinwatt/yt-dlp-mcp';
+import { validateUrl, isYouTubeUrl } from '@wesleyvdk/yt-dlp-mcp';
 
 function validateVideoUrl(url) {
   if (!validateUrl(url)) {
@@ -152,7 +154,7 @@ function validateConfig(config) {
 Always use safe cleanup for temporary files:
 
 ```javascript
-import { safeCleanup } from '@kevinwatt/yt-dlp-mcp';
+import { safeCleanup } from '@wesleyvdk/yt-dlp-mcp';
 
 try {
   // Your download code here

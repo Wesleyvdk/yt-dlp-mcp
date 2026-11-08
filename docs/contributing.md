@@ -1,5 +1,7 @@
 # Contributing Guide
 
+For the current source-checkout setup, all 15 MCP tools and profile/date workflows, see [README](../README.md) and [Video workflows](video-workflows.md). Registry installation examples apply only after publishing this fork.
+
 ## Getting Started
 
 1. Fork the repository

@@ -1,5 +1,7 @@
 # Cookies Configuration Guide
 
+For the current source-checkout setup, all 15 MCP tools and profile/date workflows, see [README](../README.md) and [Video workflows](video-workflows.md). Registry installation examples apply only after publishing this fork.
+
 ## Why Do You Need Cookies?
 
 You need to configure cookies for yt-dlp-mcp in the following situations:
@@ -102,7 +104,7 @@ Edit `claude_desktop_config.json`:
   "mcpServers": {
     "yt-dlp": {
       "command": "npx",
-      "args": ["@kevinwatt/yt-dlp-mcp"],
+      "args": ["@wesleyvdk/yt-dlp-mcp"],
       "env": {
         "YTDLP_COOKIES_FROM_BROWSER": "chrome"
       }
@@ -117,7 +119,7 @@ Edit `claude_desktop_config.json`:
   "mcpServers": {
     "yt-dlp": {
       "command": "npx",
-      "args": ["@kevinwatt/yt-dlp-mcp"],
+      "args": ["@wesleyvdk/yt-dlp-mcp"],
       "env": {
         "YTDLP_COOKIES_FILE": "/Users/username/.config/yt-dlp/cookies.txt"
       }

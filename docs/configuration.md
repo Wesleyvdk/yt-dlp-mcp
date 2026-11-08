@@ -1,5 +1,7 @@
 # Configuration Guide
 
+For the current source-checkout setup, all 15 MCP tools and profile/date workflows, see [README](../README.md) and [Video workflows](video-workflows.md). Registry installation examples apply only after publishing this fork.
+
 ## Overview
 
 The yt-dlp-mcp package can be configured through environment variables or by passing a configuration object to the functions.
@@ -136,7 +138,7 @@ const config = {
 ## Complete Configuration Example
 
 ```javascript
-import { CONFIG } from '@kevinwatt/yt-dlp-mcp';
+import { CONFIG } from '@wesleyvdk/yt-dlp-mcp';
 
 const customConfig = {
   file: {

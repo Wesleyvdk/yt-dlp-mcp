@@ -52,6 +52,8 @@ export interface Config {
     characterLimit: number;
     maxTranscriptLength: number;
   };
+  process: { timeoutMs: number; maxOutputBytes: number; };
+  analysis: { cacheDir: string; maxDurationSeconds: number; maxFileBytes: number; whisperModel: string; };
   // Cookie configuration for authenticated access
   cookies: {
     // Path to Netscape format cookie file
@@ -95,7 +97,9 @@ const defaultConfig: Config = {
   cookies: {
     file: undefined,
     fromBrowser: undefined
-  }
+  },
+  process: { timeoutMs: 300000, maxOutputBytes: 16777216 },
+  analysis: { cacheDir: path.join(os.tmpdir(), 'yt-dlp-mcp-cache'), maxDurationSeconds: 7200, maxFileBytes: 268435456, whisperModel: 'base' }
 };
 
 /**
@@ -103,6 +107,27 @@ const defaultConfig: Config = {
  */
 function loadEnvConfig(): DeepPartial<Config> {
   const envConfig: DeepPartial<Config> = {};
+  const positive = (name: string, fallback: number): number => {
+    const raw = process.env[name];
+    if (raw === undefined) return fallback;
+    const value = Number(raw);
+    if (!Number.isSafeInteger(value) || value < 1) throw new Error(`${name} must be a positive integer`);
+    return value;
+  };
+  envConfig.limits = {
+    characterLimit: positive('YTDLP_CHARACTER_LIMIT', defaultConfig.limits.characterLimit),
+    maxTranscriptLength: positive('YTDLP_MAX_TRANSCRIPT_LENGTH', defaultConfig.limits.maxTranscriptLength)
+  };
+  envConfig.process = {
+    timeoutMs: positive('YTDLP_TIMEOUT_MS', defaultConfig.process.timeoutMs),
+    maxOutputBytes: positive('YTDLP_MAX_OUTPUT_BYTES', defaultConfig.process.maxOutputBytes)
+  };
+  envConfig.analysis = {
+    cacheDir: path.resolve(process.env.YTDLP_CACHE_DIR || defaultConfig.analysis.cacheDir),
+    maxDurationSeconds: positive('YTDLP_MAX_ANALYSIS_SECONDS', defaultConfig.analysis.maxDurationSeconds),
+    maxFileBytes: positive('YTDLP_MAX_ANALYSIS_BYTES', defaultConfig.analysis.maxFileBytes),
+    whisperModel: process.env.YTDLP_WHISPER_MODEL || defaultConfig.analysis.whisperModel
+  };
 
   // File configuration
   const fileConfig: DeepPartial<Config['file']> = {
@@ -143,11 +168,11 @@ function loadEnvConfig(): DeepPartial<Config> {
 
   // Download configuration
   const downloadConfig: Partial<Config['download']> = {};
-  if (process.env.YTDLP_DEFAULT_RESOLUTION && 
+  if (process.env.YTDLP_DEFAULT_RESOLUTION &&
       ['480p', '720p', '1080p', 'best'].includes(process.env.YTDLP_DEFAULT_RESOLUTION)) {
     downloadConfig.defaultResolution = process.env.YTDLP_DEFAULT_RESOLUTION as Config['download']['defaultResolution'];
   }
-  if (process.env.YTDLP_DEFAULT_AUDIO_FORMAT && 
+  if (process.env.YTDLP_DEFAULT_AUDIO_FORMAT &&
       ['m4a', 'mp3'].includes(process.env.YTDLP_DEFAULT_AUDIO_FORMAT)) {
     downloadConfig.defaultAudioFormat = process.env.YTDLP_DEFAULT_AUDIO_FORMAT as Config['download']['defaultAudioFormat'];
   }
@@ -264,6 +289,8 @@ function mergeConfig(base: Config, override: DeepPartial<Config>): Config {
       characterLimit: override.limits?.characterLimit || base.limits.characterLimit,
       maxTranscriptLength: override.limits?.maxTranscriptLength || base.limits.maxTranscriptLength
     },
+    process: { ...base.process, ...override.process },
+    analysis: { ...base.analysis, ...override.analysis },
     cookies: {
       file: override.cookies?.file ?? base.cookies.file,
       fromBrowser: override.cookies?.fromBrowser ?? base.cookies.fromBrowser
@@ -287,20 +314,20 @@ export function loadConfig(): Config {
 export function sanitizeFilename(filename: string, config: Config['file']): string {
   // Remove illegal characters
   let safe = filename.replace(config.sanitize.illegalChars, config.sanitize.replaceChar);
-  
+
   // Check reserved names
   const basename = path.parse(safe).name.toUpperCase();
   if (config.sanitize.reservedNames.includes(basename)) {
     safe = `_${safe}`;
   }
-  
+
   // Handle length limitation
   if (safe.length > config.maxFilenameLength) {
     const ext = path.extname(safe);
     const name = safe.slice(0, config.maxFilenameLength - ext.length - config.sanitize.truncateSuffix.length);
     safe = `${name}${config.sanitize.truncateSuffix}${ext}`;
   }
-  
+
   return safe;
 }
 
@@ -325,5 +352,12 @@ export function getCookieArgs(config: Config): string[] {
   return [];
 }
 
+/** Use this server's Node executable when yt-dlp needs YouTube challenge solving. */
+export function getYtdlpArgs(config?: Config): string[] {
+  return ['--ignore-config', '--js-runtimes', `node:${process.execPath}`,
+    ...(process.env.YTDLP_FFMPEG_BINARY ? ['--ffmpeg-location', process.env.YTDLP_FFMPEG_BINARY] : []),
+    ...(config ? getCookieArgs(config) : [])];
+}
+
 // Export current configuration instance
-export const CONFIG = loadConfig(); 
+export const CONFIG = loadConfig();

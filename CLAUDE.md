@@ -37,7 +37,7 @@ This is an MCP (Model Context Protocol) server that integrates with `yt-dlp` for
 - **Utility functions**: `src/modules/utils.ts` - Shared spawn and cleanup utilities
 
 ### Tool Architecture
-The server exposes 10 MCP tools (all prefixed with `ytdlp_` in the protocol layer):
+The server exposes 15 MCP tools (all prefixed with `ytdlp_` in the protocol layer):
 1. `search_videos` - YouTube video search
 2. `list_subtitle_languages` - List available subtitles
 3. `download_video_subtitles` - Download subtitle files
@@ -48,6 +48,11 @@ The server exposes 10 MCP tools (all prefixed with `ytdlp_` in the protocol laye
 8. `get_video_metadata_summary` - Get human-readable metadata summary
 9. `get_video_comments` - Extract comments as flat JSON, threaded JSON, or AI-friendly Markdown
 10. `get_video_comments_summary` - Get human-readable flat or threaded comment summaries
+11. `list_creator_videos` - List bounded profile pages with inclusive date filters
+12. `download_creator_videos` - Download a bounded profile page with per-video outcomes
+13. `analyze_video` - Return timestamped images and caption or local speech transcripts
+14. `get_frame` - Inspect one frame at a requested timestamp
+15. `diagnostics` - Check external tool availability
 
 ### Comments Architecture
 The comments flow is split into small modules:
@@ -93,8 +98,8 @@ Important comments behavior:
 ### Dependencies
 - **Required external**: `yt-dlp` must be installed and in PATH
 - **Core MCP**: `@modelcontextprotocol/sdk` for server implementation
-- **Process management**: `spawn-rx` for async process spawning
-- **File operations**: `rimraf` for cleanup
+- **Process management**: Node child_process with bounded output, timeout, cancellation and AsyncLocalStorage request context
+- **File operations**: Node fs promises with unique temporary directories
 
 ### Configuration System
 `CONFIG` object loaded from `config.ts` supports:
@@ -157,3 +162,11 @@ Comprehensive test suite in `src/__tests__/metadata.test.ts` covers:
 - Threaded JSON returns `comments: ThreadedComment[]`
 - Both JSON modes add `root_threads`, `reply_comments`, `orphan_comments`
 - Markdown mode is optimized for LLM consumption with `## Thread N` blocks and explicit `parent_id`, `depth`, and `reply_count`
+
+## Video inspection and profiles (0.10.0)
+
+- New tools: analyze_video, get_frame, list_creator_videos, download_creator_videos, diagnostics (all ytdlp_ prefixed).
+- analysis.ts extracts bounded timestamped JPEGs as MCP image content; subtitle.ts adds local CPU Whisper fallback.
+- profile.ts uses inclusive date ranges and bounded raw-source pagination; unknown dates are excluded when filtering.
+- api.ts is the side-effect-free library entry; index.mts is the stdio executable.
+- npm test runs fixture/unit tests; npm run test:smoke exercises real local media over MCP; npm run test:integration opts into live-platform tests.

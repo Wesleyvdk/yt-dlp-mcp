@@ -1,188 +1,104 @@
-import * as fs from 'fs';
-import { spawn } from 'child_process';
-import { randomBytes } from 'crypto';
+import * as fs from 'node:fs';
+import { spawn } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { CONFIG } from '../config.js';
 
-/**
- * Validates if a given string is a valid URL.
- * 
- * @param url - The URL string to validate
- * @returns True if the URL is valid, false otherwise
- * 
- * @example
- * ```typescript
- * if (validateUrl('https://youtube.com/watch?v=...')) {
- *   // URL is valid
- * }
- * ```
- */
+export interface ExecutionContext { signal?: AbortSignal; progress?: (message: string) => void; }
+export const executionContext = new AsyncLocalStorage<ExecutionContext>();
+
 export function validateUrl(url: string): boolean {
   try {
-    new URL(url);
-    return true;
-  } catch {
-    return false;
-  }
+    const parsed = new URL(url);
+    return ['https:', 'http:'].includes(parsed.protocol) && !parsed.username && !parsed.password;
+  } catch { return false; }
 }
-
-/**
- * Checks if a URL is from YouTube.
- * 
- * @param url - The URL to check
- * @returns True if the URL is from YouTube, false otherwise
- * 
- * @example
- * ```typescript
- * if (isYouTubeUrl('https://youtube.com/watch?v=...')) {
- *   // URL is from YouTube
- * }
- * ```
- */
 export function isYouTubeUrl(url: string): boolean {
   try {
-    const parsedUrl = new URL(url);
-    return parsedUrl.hostname.includes('youtube.com') || parsedUrl.hostname.includes('youtu.be');
-  } catch {
-    return false;
-  }
+    const host = new URL(url).hostname.toLowerCase();
+    return host === 'youtu.be' || host === 'youtube.com' || host.endsWith('.youtube.com');
+  } catch { return false; }
 }
-
-/**
- * Safely cleans up a directory and its contents.
- * 
- * @param directory - Path to the directory to clean up
- * @returns Promise that resolves when cleanup is complete
- * @throws {Error} When directory cannot be removed
- * 
- * @example
- * ```typescript
- * try {
- *   await safeCleanup('/path/to/temp/dir');
- * } catch (error) {
- *   console.error('Cleanup failed:', error);
- * }
- * ```
- */
 export async function safeCleanup(directory: string): Promise<void> {
-  try {
-    await fs.promises.rm(directory, { recursive: true, force: true });
-  } catch (error) {
-    console.error(`Error cleaning up directory ${directory}:`, error);
-  }
+  await fs.promises.rm(directory, { recursive: true, force: true });
 }
-
-/**
- * Spawns a child process and returns its output as a promise.
- * 
- * @param command - The command to execute
- * @param args - Array of command arguments
- * @returns Promise resolving to the command output
- * @throws {Error} When command execution fails
- * 
- * @example
- * ```typescript
- * try {
- *   const output = await _spawnPromise('yt-dlp', ['--version']);
- *   console.log('yt-dlp version:', output);
- * } catch (error) {
- *   console.error('Command failed:', error);
- * }
- * ```
- */
-export function _spawnPromise(command: string, args: string[]): Promise<string> {
+export interface SpawnOptions extends ExecutionContext { timeoutMs?: number; maxOutputBytes?: number; }
+export function _spawnPromise(command: string, args: string[], options: SpawnOptions = {}): Promise<string> {
+  const context = executionContext.getStore();
+  const signal = options.signal ?? context?.signal;
+  const progress = options.progress ?? context?.progress;
+  const timeoutMs = options.timeoutMs ?? CONFIG.process.timeoutMs;
+  const maxOutputBytes = options.maxOutputBytes ?? CONFIG.process.maxOutputBytes;
+  const binaries: Record<string, string | undefined> = {
+    'yt-dlp': process.env.YTDLP_BINARY, ffmpeg: process.env.YTDLP_FFMPEG_BINARY,
+    ffprobe: process.env.YTDLP_FFPROBE_BINARY, whisper: process.env.YTDLP_WHISPER_BINARY
+  };
   return new Promise((resolve, reject) => {
-    const process = spawn(command, args);
-    let stdout = '';
-    let stderr = '';
-
-    process.on('error', (err) => {
-      reject(new Error(`Failed to spawn ${command}: ${err.message}`));
-    });
-
-    process.stdout.on('data', (data) => {
-      stdout += data.toString();
-    });
-
-    process.stderr.on('data', (data) => {
-      stderr += data.toString();
-    });
-
-    process.on('close', (code) => {
-      if (code === 0) {
-        resolve(stdout);
-      } else {
-        reject(new Error(`Failed with exit code: ${code}\n${stderr}\n${stdout}`));
+    if (signal?.aborted) { reject(new Error('Operation cancelled')); return; }
+    const child = spawn(binaries[command] || command, args, { windowsHide: true, detached: process.platform !== 'win32' });
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
+    let stdout = '', stderr = '', bytes = 0, settled = false, lastProgress = 0;
+    const finish = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', abort);
+      if (error) reject(error); else resolve(stdout);
+    };
+    const terminate = (error: Error) => {
+      if (child.pid) {
+        if (process.platform === 'win32') {
+          const killer = spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
+          killer.on('error', () => child.kill());
+          killer.on('close', code => { if (code !== 0) child.kill(); });
+          killer.unref();
+        } else {
+          try { process.kill(-child.pid, 'SIGKILL'); } catch { child.kill('SIGKILL'); }
+        }
+      }
+      finish(error);
+    };
+    const abort = () => terminate(new Error('Operation cancelled'));
+    const timer = setTimeout(() => terminate(new Error(`${command} timed out after ${timeoutMs}ms`)), timeoutMs);
+    signal?.addEventListener('abort', abort, { once: true });
+    child.on('error', error => finish(new Error(`Failed to spawn ${command}: ${error.message}`)));
+    child.stdout.on('data', (data: string) => {
+      if (settled) return;
+      bytes += Buffer.byteLength(data);
+      if (bytes > maxOutputBytes) { terminate(new Error(`${command} output exceeded ${maxOutputBytes} bytes`)); return; }
+      stdout += data;
+      if (Date.now() - lastProgress > 500) {
+        const match = data.match(/__YTDLP_PROGRESS__(.*)/);
+        if (match) { lastProgress = Date.now(); progress?.(`${command}: ${match[1].trim()}`); }
       }
     });
+    child.stderr.on('data', (data: string) => { if (!settled) stderr = (stderr + data).slice(-65536); });
+    child.on('close', code => finish(code === 0 ? undefined : new Error(`${command} exited with code ${code}: ${stderr.slice(-8000)}`)));
+    progress?.(`Running ${command}`);
   });
 }
-
-/**
- * Generates a formatted timestamp string for file naming.
- * 
- * @returns Formatted timestamp string in the format 'YYYY-MM-DD_HH-mm-ss'
- * 
- * @example
- * ```typescript
- * const timestamp = getFormattedTimestamp();
- * console.log(timestamp); // '2024-03-20_12-30-00'
- * ```
- */
-export function getFormattedTimestamp(): string {
-  return new Date().toISOString()
-    .replace(/[:.]/g, '-')
-    .replace('T', '_')
-    .split('.')[0];
-}
-
-/**
- * Generates a random filename with timestamp prefix.
- * 
- * @param extension - Optional file extension (default: 'mp4')
- * @returns A random filename with timestamp
- * 
- * @example
- * ```typescript
- * const filename = generateRandomFilename('mp3');
- * console.log(filename); // '2024-03-20_12-30-00_a1b2c3d4.mp3'
- * ```
- */
-export function generateRandomFilename(extension: string = 'mp4'): string {
-  const timestamp = getFormattedTimestamp();
-  const randomId = randomBytes(4).toString('hex');
-  return `${timestamp}_${randomId}.${extension}`;
-}
-
-/**
- * Cleans SRT subtitle content to produce a plain text transcript.
- * Removes timestamps, sequence numbers, and HTML tags.
- * 
- * @param srtContent - Raw SRT subtitle content
- * @returns Cleaned transcript text
- * 
- * @example
- * ```typescript
- * const cleanedText = cleanSubtitleToTranscript(srtContent);
- * console.log(cleanedText); // 'Hello world this is a transcript...'
- * ```
- */
+export function getFormattedTimestamp(): string { return new Date().toISOString().replace(/[:.]/g, '-'); }
+export function generateRandomFilename(extension = 'mp4'): string { return `${getFormattedTimestamp()}_${randomBytes(4).toString('hex')}.${extension}`; }
 export function cleanSubtitleToTranscript(srtContent: string): string {
-  return srtContent
-    .split('\n')
-    .filter(line => {
-      const trimmed = line.trim();
-      // Remove empty lines
-      if (!trimmed) return false;
-      // Remove sequence numbers (lines that are just digits)
-      if (/^\d+$/.test(trimmed)) return false;
-      // Remove timestamp lines
-      if (/^\d{2}:\d{2}:\d{2}[.,]\d{3}\s*-->\s*\d{2}:\d{2}:\d{2}[.,]\d{3}$/.test(trimmed)) return false;
-      return true;
-    })
-    .map(line => {
-      // Remove HTML tags
-      return line.replace(/<[^>]*>/g, '');
-    })
-    .join(' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-} 
+  return srtContent.split('\n').filter(line => {
+    const text = line.trim();
+    return text && !/^\d+$/.test(text) && !/^\d{2}:\d{2}:\d{2}[.,]\d{3}\s*-->/.test(text);
+  }).map(line => line.replace(/<[^>]*>/g, '')).join(' ').replace(/\s+/g, ' ').trim();
+}
+export function boundedJson(value: Record<string, unknown>, limit: number): string {
+  if (limit < 2) throw new Error('JSON character limit must be at least 2');
+  const result = { ...value };
+  if (JSON.stringify(result, null, 2).length <= limit) return JSON.stringify(result, null, 2);
+  result._truncated = true;
+  while (JSON.stringify(result, null, 2).length > limit) {
+    const keys = Object.keys(result).filter(key => key !== '_truncated');
+    if (!keys.length) return limit >= 19 ? '{"_truncated":true}' : '{}';
+    const largest = keys.sort((a, b) => JSON.stringify(result[b]).length - JSON.stringify(result[a]).length)[0];
+    const content = result[largest];
+    if (typeof content === 'string' && content.length > 32) result[largest] = content.slice(0, Math.floor(content.length / 2)) + '…';
+    else if (Array.isArray(content) && content.length > 1) result[largest] = content.slice(0, Math.floor(content.length / 2));
+    else delete result[largest];
+  }
+  return JSON.stringify(result, null, 2);
+}
